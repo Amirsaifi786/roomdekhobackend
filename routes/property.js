@@ -64,66 +64,6 @@ router.get("/slug/:slug", async (req, res) => {
   }
 });
 
-/* ================= MENU ================= */
-// router.get("/menu", async (req, res) => {
-//   try {
-//     const properties = await Property.find({ status: 1 }, "propertyType rooms title pgType");
-
-//     const menu = { Houses: [], Flats: [], "PG/Hostel": [] };
-
-//     menu.Houses.push(    { title: "All Houses",     path: "/property/all-houses" });
-//     menu.Flats.push(     { title: "All Flats",      path: "/property/all-flats"  });
-//     menu["PG/Hostel"].push({ title: "All PG/Hostel", path: "/property/all-pg"   });
-
-//     const seenHouses = new Set();
-//     const seenFlats  = new Set();
-//     const seenPg     = new Set();
-
-//     properties.forEach((item) => {
-//       if (!item.propertyType) return;
-//       const type = item.propertyType.toLowerCase().trim();
-//       let slug = "", displayTitle = "";
-
-//       if (type === "house" || type === "houses") {
-//         slug         = item.rooms ? `${item.rooms}-room` : slugify(item.title);
-//         displayTitle = item.rooms ? `${item.rooms} Room Set` : item.title;
-//         if (!seenHouses.has(slug)) {
-//           menu.Houses.push({ title: displayTitle, path: `/property/${slug}` });
-//           seenHouses.add(slug);
-//         }
-//       } else if (type === "flat" || type === "flats") {
-//         slug         = item.rooms ? `${item.rooms}-bhk` : slugify(item.title);
-//         displayTitle = item.rooms ? `${item.rooms} BHK Flats` : item.title;
-//         if (!seenFlats.has(slug)) {
-//           menu.Flats.push({ title: displayTitle, path: `/property/${slug}` });
-//           seenFlats.add(slug);
-//         }
-//       } else if (type === "pg" || type === "hostel") {
-//         if (!item.pgType) return;
-//         slug         = item.pgType.toLowerCase().replace(/\s+/g, "-");
-//         displayTitle = item.pgType;
-//         if (!seenPg.has(slug)) {
-//           menu["PG/Hostel"].push({ title: displayTitle, path: `/property/${slug}` });
-//           seenPg.add(slug);
-//         }
-//       }
-//     });
-
-//     res.json(menu);
-//   } catch (err) {
-//     res.status(500).json({ message: "DB error", error: err.message });
-//   }
-// });
-// const slugify = (text) => {
-//   return text
-//     ?.toString()
-//     .toLowerCase()
-//     .trim()
-//     .replace(/\s+/g, "-")
-//     .replace(/[^\w\-]+/g, "");
-// };
-
-
 
 router.get("/menu", async (req, res) => {
   try {
@@ -361,16 +301,45 @@ router.get("/property/:id", async (req, res) => {
 
 router.get("/top-properties", async (req, res) => {
   try {
-    const { type } = req.query; // single / double / triple
+    const { type } = req.query; // single / double / triple / normal
 
-    let filter = {};
+    let filter = { status: 1 };
 
-    if (type) {
-      filter.priceType = type;
+    // ================= NON-PG (HOUSE / FLAT) =================
+    if (!type) {
+      const properties = await Property.find({
+        ...filter,
+        propertyType: { $nin: ["pg", "hostel"] }
+      })
+        .sort({ price: -1 }) // 🔥 highest price
+        .limit(3);
+
+      return res.json({
+        success: true,
+        data: properties
+      });
     }
 
-    const properties = await Property.find(filter)
-      .sort({ price: -1 })
+    // ================= PG BASED =================
+    let sortField = "";
+
+    if (type === "single") sortField = "singlePrice";
+    else if (type === "double") sortField = "doublePrice";
+    else if (type === "triple") sortField = "triplePrice";
+    else if (type === "normal") sortField = "normalPrice"; // ✅ Added normal case
+    else {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid type. Use: single, double, triple, or normal"
+      });
+    }
+
+    const properties = await Property.find({
+      ...filter,
+      propertyType: { $in: ["pg", "hostel"] },
+      [sortField]: { $exists: true, $gt: 0 } // ✅ Check field exists and has valid price
+    })
+      .sort({ [sortField]: -1 }) // 🔥 highest first
       .limit(3);
 
     res.json({
@@ -379,6 +348,8 @@ router.get("/top-properties", async (req, res) => {
     });
 
   } catch (err) {
+    console.error("TOP PROPERTY ERROR:", err);
+
     res.status(500).json({
       success: false,
       message: "Server error",
